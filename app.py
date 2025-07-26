@@ -1,26 +1,20 @@
 import streamlit as st
 import os
-import google.generativeai as genai
 import requests
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
-api_key = os.getenv("GOOGLE_API_KEY")
-genai.configure(api_key=api_key)
+google_api_key = os.getenv("GOOGLE_API_KEY")
+openai_api_key = os.getenv("OPENAI_API_KEY")
 
-# Define Gemini model
-generation_config = {
-    "temperature": 1,
-    "top_p": 0.95,
-    "top_k": 64,
-    "max_output_tokens": 1024,
-    "response_mime_type": "text/plain"
-}
-model = genai.GenerativeModel(model_name="gemini-pro", generation_config=generation_config)
+# Check if both API keys are set
+if not google_api_key and not openai_api_key:
+    st.error("Please set your GOOGLE_API_KEY and OPENAI_API_KEY in the .env file.")
+    st.stop()
 
-# Define design generation function
-def generate_design_idea(style, size, bedrooms, special_requirements):
+# Function to generate design idea using Google Generative AI
+def generate_design_idea_google(style, size, bedrooms, special_requirements):
     prompt = f"""
     Design a modern house with the following specifications:
     - Style: {style}
@@ -30,8 +24,38 @@ def generate_design_idea(style, size, bedrooms, special_requirements):
 
     Provide a detailed layout description in 150-200 words.
     """
-    response = model.generate_content(prompt)
-    return response.text
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=google_api_key)
+        model = genai.GenerativeModel(model_name="gemini-pro")
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        st.error(f"Error generating design idea with Google AI: {e}")
+        return None
+
+# Function to generate design idea using OpenAI
+def generate_design_idea_openai(style, size, bedrooms, special_requirements):
+    prompt = f"""
+    Design a modern house with the following specifications:
+    - Style: {style}
+    - Size: {size}
+    - Number of Bedrooms: {bedrooms}
+    - Special Requirements: {special_requirements}
+
+    Provide a detailed layout description in 150-200 words.
+    """
+    try:
+        import openai
+        openai.api_key = openai_api_key
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return response.choices[0].message['content']
+    except Exception as e:
+        st.error(f"Error generating design idea with OpenAI: {e}")
+        return None
 
 # Define image generation from Lexica.art
 def generate_image_url(prompt):
@@ -45,7 +69,7 @@ def generate_image_url(prompt):
                 return data["images"][0]["srcSmall"]
         return None
     except Exception as e:
-        print("Lexica API error:", e)
+        st.error(f"Error fetching image: {e}")
         return None
 
 # Streamlit UI
@@ -63,8 +87,11 @@ if st.button("Generate Design Idea"):
         st.error("Please enter a valid plot size.")
     else:
         with st.spinner("Generating layout and image..."):
-            # Generate text
-            layout_text = generate_design_idea(style, size, bedrooms, special_requirements)
+            # Try generating with Google AI first
+            layout_text = generate_design_idea_google(style, size, bedrooms, special_requirements)
+            if layout_text is None:
+                # Fallback to OpenAI if Google AI fails
+                layout_text = generate_design_idea_openai(style, size, bedrooms, special_requirements)
 
             # Generate image
             image_prompt = f"{style} house plan, {size}, {bedrooms} bedrooms, {special_requirements}"
@@ -82,4 +109,4 @@ if st.button("Generate Design Idea"):
 
         # Export Option
         st.download_button("📥 Download Layout Text", layout_text, file_name="layout_idea.txt")
-
+        st.success("Design idea generated successfully!") 
