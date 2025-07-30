@@ -1,112 +1,94 @@
 import streamlit as st
+import google.generativeai as genai
+import openai
 import os
 import requests
 from dotenv import load_dotenv
 
-# Load environment variables
+# Load environment variables from .env
 load_dotenv()
-google_api_key = os.getenv("GOOGLE_API_KEY")
-openai_api_key = os.getenv("OPENAI_API_KEY")
 
-# Check if both API keys are set
-if not google_api_key and not openai_api_key:
-    st.error("Please set your GOOGLE_API_KEY and OPENAI_API_KEY in the .env file.")
-    st.stop()
+# API Keys
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# Function to generate design idea using Google Generative AI
-def generate_design_idea_google(style, size, bedrooms, special_requirements):
-    prompt = f"""
-    Design a modern house with the following specifications:
-    - Style: {style}
-    - Size: {size}
-    - Number of Bedrooms: {bedrooms}
-    - Special Requirements: {special_requirements}
+# Configure APIs
+genai.configure(api_key=GEMINI_API_KEY)
+openai.api_key = OPENAI_API_KEY
 
-    Provide a detailed layout description in 150-200 words.
-    """
+# Valid home styles
+HOME_STYLES = [
+    "Modern", "Traditional", "Contemporary", "Minimalist",
+    "Rustic", "Industrial", "Mediterranean", "Colonial", "Victorian"
+]
+
+# Function: Generate layout from Gemini
+def generate_with_gemini(style, size, rooms):
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=google_api_key)
-        model = genai.GenerativeModel(model_name="gemini-pro")
-        response = model.generate_content(prompt)
+        prompt = f"Design a {style}-style home of {size} sq ft with {rooms} rooms. Include layout and furniture suggestions."
+        model = genai.GenerativeModel("gemini-1.5-flash-latest")
+        chat = model.start_chat()
+        response = chat.send_message(prompt)
         return response.text
     except Exception as e:
-        st.error(f"Error generating design idea with Google AI: {e}")
         return None
 
-# Function to generate design idea using OpenAI
-def generate_design_idea_openai(style, size, bedrooms, special_requirements):
-    prompt = f"""
-    Design a modern house with the following specifications:
-    - Style: {style}
-    - Size: {size}
-    - Number of Bedrooms: {bedrooms}
-    - Special Requirements: {special_requirements}
-
-    Provide a detailed layout description in 150-200 words.
-    """
+# Function: Fallback OpenAI generator
+def generate_with_openai(style, size, rooms):
     try:
-        import openai
-        openai.api_key = openai_api_key
+        prompt = f"Design a {style}-style home of {size} sq ft with {rooms} rooms. Include layout and furniture suggestions."
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
         )
-        return response.choices[0].message['content']
+        return response.choices[0].message["content"]
     except Exception as e:
-        st.error(f"Error generating design idea with OpenAI: {e}")
-        return None
+        return f"❌ OpenAI Error: {e}"
 
-# Define image generation from Lexica.art
-def generate_image_url(prompt):
+# Function: Fetch image from Lexica.art
+def fetch_lexica_image(query):
     try:
-        url = f"https://lexica.art/api/v1/search?q={prompt}"
-        response = requests.get(url)
-
-        if response.status_code == 200:
-            data = response.json()
+        res = requests.get(f"https://lexica.art/api/v1/search?q={query}")
+        if res.status_code == 200:
+            data = res.json()
             if data["images"]:
-                return data["images"][0]["srcSmall"]
+                return data["images"][0]["srcSmall"]  # or src if you want bigger
         return None
     except Exception as e:
-        st.error(f"Error fetching image: {e}")
         return None
 
 # Streamlit UI
-st.set_page_config(page_title="AI-Driven Home Design Assistant", layout="centered")
-st.title("🏠 AI-Driven Home Design Assistant")
-st.markdown("Use AI to design your dream home layout and view a visual sample!")
+st.set_page_config(page_title="AI Home Designer", page_icon="🏡")
+st.title("🏡 AI-Driven Home Design Assistant")
+st.markdown("Generate home design ideas based on selected style, size, and room count.")
 
-style = st.selectbox("🏗️ Select Architectural Style:", ["Modern", "Traditional", "Minimalist", "Victorian", "Futuristic"])
-size = st.text_input("📏 Enter Plot Size (e.g., 38x38 ft):")
-bedrooms = st.number_input("🛏️ Number of Bedrooms:", min_value=1, max_value=10, value=3)
-special_requirements = st.text_area("✨ Any Special Requirements?", placeholder="E.g., pooja room, open kitchen, east-facing, etc.")
+# UI Inputs
+style = st.selectbox("🏷️ Select Home Style", HOME_STYLES)
+size = st.number_input("📐 Home Size (sq ft)", min_value=100, max_value=10000, value=1000)
+rooms = st.number_input("🚪 Number of Rooms", min_value=1, max_value=10, value=3)
 
-if st.button("Generate Design Idea"):
-    if not size.strip():
-        st.error("Please enter a valid plot size.")
-    else:
-        with st.spinner("Generating layout and image..."):
-            # Try generating with Google AI first
-            layout_text = generate_design_idea_google(style, size, bedrooms, special_requirements)
-            if layout_text is None:
-                # Fallback to OpenAI if Google AI fails
-                layout_text = generate_design_idea_openai(style, size, bedrooms, special_requirements)
+# Generate Button
+if st.button("✨ Generate Design Idea"):
+    with st.spinner("🔧 Generating layout with Gemini..."):
+        idea = generate_with_gemini(style, size, rooms)
 
-            # Generate image
-            image_prompt = f"{style} house plan, {size}, {bedrooms} bedrooms, {special_requirements}"
-            image_url = generate_image_url(image_prompt)
+    if idea:
+        st.success("✅ Design layout generated!")
+        st.markdown("### 📝 Layout Plan")
+        st.markdown(idea)
 
-        # Display result
-        st.subheader("📝 Layout Plan")
-        st.write(layout_text)
-
+        # Fetch image based on style
+        with st.spinner("🖼️ Fetching visual sample..."):
+            image_url = fetch_lexica_image(f"{style} home exterior")
         if image_url:
-            st.subheader("🖼️ Visual Sample")
-            st.image(image_url, caption="AI-generated layout image", use_column_width=True)
+            st.image(image_url, caption=f"{style} Style Home", use_container_width=True)
         else:
-            st.warning("Could not fetch image from Lexica.art. Please try again.")
-
-        # Export Option
-        st.download_button("📥 Download Layout Text", layout_text, file_name="layout_idea.txt")
-        st.success("Design idea generated successfully!") 
+            st.warning("⚠️ Couldn't fetch image preview.")
+    else:
+        st.warning("⚠️ Gemini API failed. Click below to retry with OpenAI.")
+        if st.button("🔁 Retry with OpenAI"):
+            with st.spinner("Generating design using OpenAI..."):
+                alt_idea = generate_with_openai(style, size, rooms)
+            st.success("✅ Design idea from OpenAI:")
+            st.markdown(alt_idea)

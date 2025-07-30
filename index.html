@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Custom Home Design Assistant</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🏠 AI-Driven Custom Home Design Assistant</h1>
+      <p>Generate home layout ideas using Google Gemini & OpenAI</p>
+    </header>
+
+    <form id="designForm">
+      <label for="style">Style:</label>
+      <input type="text" id="style" name="style" placeholder="e.g., Modern, Traditional" required>
+
+      <label for="size">Size:</label>
+      <input type="text" id="size" name="size" placeholder="e.g., 38x38 ft" required>
+
+      <label for="bedrooms">Number of Bedrooms:</label>
+      <input type="number" id="bedrooms" name="bedrooms" min="1" max="10" required>
+
+      <label for="requirements">Special Requirements:</label>
+      <textarea id="requirements" name="requirements" rows="3" placeholder="e.g., Pooja Room, Study Area"></textarea>
+
+      <button type="submit">Generate Layout</button>
+    </form>
+
+    <div class="output-section" id="output">
+      <h2>📝 Layout Plan</h2>
+      <pre id="layoutText">Waiting for layout...</pre>
+
+      <h2>🖼️ Visual Sample</h2>
+      <img id="layoutImage" src="" alt="Home Layout Image" />
+    </div>
+  </div>
+</body>
+</html>
