@@ -181,14 +181,14 @@ def render_layout_results(layouts: List[Dict]):
             with col2:
                 # Layout image
                 if layout.get('image_url'):
-                    st.markdown("**🎨 AI Generated Visualization (Veo3):**")
+                    st.markdown("**🎨 Curated Interior Design Visualization:**")
                     st.image(
                         layout['image_url'],
-                        caption="Generated with Gemini Veo3 - Photorealistic Interior Design",
+                        caption="High-quality interior design reference image",
                         use_column_width=True
                     )
                 else:
-                    st.info("🎬 Veo3 image generation in progress...")
+                    st.info("🎨 Loading interior design visualization...")
             
             st.markdown("</div>", unsafe_allow_html=True)
             st.markdown("---")

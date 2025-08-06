@@ -146,13 +146,7 @@ def main():
         st.markdown("<div class='sidebar-section'>", unsafe_allow_html=True)
         st.subheader("⚙️ Generation Settings")
         
-        num_layouts = st.slider(
-            "Number of layouts to generate",
-            min_value=1,
-            max_value=5,
-            value=3,
-            help="More layouts take longer to generate"
-        )
+        st.info("📋 Generating 1 layout per request for optimal quality")
         
         image_quality = st.selectbox(
             "Image Quality",

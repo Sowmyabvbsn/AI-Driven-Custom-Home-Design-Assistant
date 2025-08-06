@@ -43,7 +43,7 @@ class AIService:
             
             # Parse response into multiple layout ideas
             layouts = self._parse_layout_response(response)
-            return layouts[:preferences.get('num_layouts', 3)]
+            return layouts[:1]  # Return only one layout
         
         except Exception as e:
             st.error(f"Error generating layouts: {str(e)}")
@@ -51,24 +51,25 @@ class AIService:
     
     async def generate_layout_image(self, description: str, preferences: Dict) -> Optional[str]:
         """Generate layout image using AI"""
-        image_prompt = self._create_image_prompt(description, preferences)
+        # Use preferences directly for more reliable image selection
+        room_type = self._map_room_type(preferences['room_type'])
+        style = self._map_style(preferences['style'])
         
         try:
             if self.provider == "gemini":
-                # For demo purposes, using placeholder images
-                # In production, you would integrate with Gemini's Veo3 API
-                return await self._generate_image_with_gemini(image_prompt)
+                # Use preferences directly instead of parsing from description
+                return self._get_curated_image(room_type, style)
             elif self.provider == "openai":
+                image_prompt = self._create_image_prompt(description, preferences)
                 return await self._generate_image_with_openai(image_prompt)
         
         except Exception as e:
             st.error(f"Error generating image: {str(e)}")
-            return None
     
     def _create_layout_prompt(self, preferences: Dict) -> str:
         """Create prompt for layout generation"""
         return f"""
-        Create 3 detailed home layout ideas for a {preferences['room_type']} with the following specifications:
+        Create 1 detailed home layout idea for a {preferences['room_type']} with the following specifications:
         
         Style: {preferences['style']}
         Budget Range: {preferences['budget']}
@@ -77,7 +78,7 @@ class AIService:
         Special Features: {', '.join(preferences.get('features', []))}
         Additional Notes: {preferences.get('description', '')}
         
-        For each layout, provide:
+        For the layout, provide:
         1. A descriptive title
         2. Detailed layout description (150-200 words)
         3. Key features and furniture placement
@@ -85,11 +86,11 @@ class AIService:
         5. Lighting suggestions
         6. Budget-conscious tips
         
-        Format each layout as:
-        LAYOUT [number]:
+        Format the layout as:
+        LAYOUT 1:
         [Detailed description]
         
-        Make each layout unique and practical while staying within the specified parameters.
+        Make the layout unique and practical while staying within the specified parameters.
         """
     
     def _create_image_prompt(self, description: str, preferences: Dict) -> str:
@@ -136,110 +137,201 @@ class AIService:
     async def _generate_image_with_gemini(self, prompt: str) -> str:
         """Generate image using Gemini Veo3"""
         try:
-            # Create a more detailed prompt for Veo3 image generation
-            veo3_prompt = f"""
-            Generate a high-quality, photorealistic interior design image with the following specifications:
-            
-            {prompt}
-            
-            Technical requirements:
-            - Ultra-high resolution (4K quality)
-            - Professional interior photography lighting
-            - Realistic textures and materials
-            - Accurate perspective and proportions
-            - Clean, uncluttered composition
-            - Natural color grading
-            - Sharp focus throughout the scene
-            """
-            
-            # Use Gemini's image generation capabilities
-            # Note: This uses the current Gemini API structure
-            # Adjust based on actual Veo3 API when available
-            response = await self._generate_veo3_image(veo3_prompt)
-            
-            if response and 'image_data' in response:
-                # Convert base64 image data to URL or save locally
-                return self._process_veo3_image(response['image_data'])
-            else:
-                # Fallback to curated stock images if Veo3 fails
-                return self._get_fallback_image(prompt)
+            # Since Veo3 is not yet available in the public API,
+            # we'll use a more sophisticated fallback system with better image selection
+            return await self._get_contextual_image(prompt)
                 
         except Exception as e:
-            st.warning(f"Veo3 image generation failed: {str(e)}. Using fallback image.")
-            return self._get_fallback_image(prompt)
+            st.warning(f"Image generation failed: {str(e)}. Using contextual fallback.")
+            return await self._get_contextual_image(prompt)
     
-    async def _generate_veo3_image(self, prompt: str) -> Optional[Dict]:
-        """Generate image using Veo3 API"""
+    async def _get_contextual_image(self, prompt: str) -> str:
+        """Get contextual image based on room type and style"""
         try:
-            # This is the structure for Veo3 integration
-            # Note: Actual API endpoints may vary when Veo3 becomes available
+            # Extract room type and style from prompt with debugging
+            room_type = self._extract_room_type(prompt)
+            style = self._extract_style(prompt)
             
-            # For now, using Gemini's current image generation capabilities
-            # with enhanced prompting for better results
-            response = self.veo3_client.generate_content([
-                prompt,
-                "Generate this as a photorealistic interior design visualization"
-            ])
+            # Debug logging
+            print(f"DEBUG - Prompt: {prompt[:100]}...")
+            print(f"DEBUG - Extracted room_type: {room_type}, style: {style}")
             
-            # Process the response based on actual Veo3 API structure
-            if hasattr(response, 'candidates') and response.candidates:
-                candidate = response.candidates[0]
-                if hasattr(candidate, 'content'):
-                    # Extract image data from response
-                    # This structure will need to be updated based on actual Veo3 API
-                    return {
-                        'image_data': candidate.content,
-                        'metadata': {
-                            'model': 'veo3',
-                            'quality': 'high',
-                            'generated_at': datetime.now().isoformat()
-                        }
-                    }
+            # Get curated images based on room type and style
+            image_url = self._get_curated_image(room_type, style)
+            print(f"DEBUG - Selected image URL: {image_url}")
             
-            return None
+            return image_url
             
         except Exception as e:
-            raise Exception(f"Veo3 API error: {str(e)}")
-    
-    def _process_veo3_image(self, image_data: str) -> str:
-        """Process Veo3 image data and return URL"""
-        try:
-            # If image_data is base64, convert to displayable format
-            if isinstance(image_data, str) and image_data.startswith('data:image'):
-                return image_data
-            
-            # If raw base64, add proper data URL prefix
-            if isinstance(image_data, str):
-                return f"data:image/png;base64,{image_data}"
-            
-            # For other formats, you might need to save to temporary file
-            # and return file path or convert to base64
-            return self._get_fallback_image("default")
-            
-        except Exception as e:
-            st.error(f"Error processing Veo3 image: {str(e)}")
             return self._get_fallback_image("default")
     
-    def _get_fallback_image(self, prompt: str) -> str:
-        """Get fallback image when Veo3 is unavailable"""
-        room_type = prompt.lower()
+    def _map_room_type(self, room_type: str) -> str:
+        """Map UI room type to internal room type"""
+        mapping = {
+            'Living Room': 'living',
+            'Bedroom': 'bedroom',
+            'Master Bedroom': 'bedroom',
+            'Children\'s Room': 'bedroom',
+            'Kitchen': 'kitchen',
+            'Bathroom': 'bathroom',
+            'Home Office': 'office',
+            'Study Room': 'office',
+            'Dining Room': 'dining'
+        }
+        return mapping.get(room_type, 'living')
+    
+    def _map_style(self, style: str) -> str:
+        """Map UI style to internal style"""
+        mapping = {
+            'Modern': 'modern',
+            'Contemporary': 'modern',
+            'Traditional': 'traditional',
+            'Minimalist': 'scandinavian',
+            'Scandinavian': 'scandinavian',
+            'Industrial': 'industrial',
+            'Bohemian': 'bohemian',
+            'Rustic': 'traditional',
+            'Mid-Century Modern': 'modern',
+            'Art Deco': 'modern',
+            'Mediterranean': 'traditional',
+            'Farmhouse': 'traditional'
+        }
+        return mapping.get(style, 'modern')
+    
+    def _extract_room_type(self, prompt: str) -> str:
+        """Extract room type from prompt"""
+        prompt_lower = prompt.lower()
         
-        # High-quality stock images from Pexels as fallbacks
-        fallback_images = {
-            'living': "https://images.pexels.com/photos/1571460/pexels-photo-1571460.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=2",
-            'bedroom': "https://images.pexels.com/photos/164595/pexels-photo-164595.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=2",
-            'kitchen': "https://images.pexels.com/photos/2724748/pexels-photo-2724748.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=2",
-            'bathroom': "https://images.pexels.com/photos/1454806/pexels-photo-1454806.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=2",
-            'office': "https://images.pexels.com/photos/667838/pexels-photo-667838.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=2",
-            'dining': "https://images.pexels.com/photos/1395967/pexels-photo-1395967.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=2",
-            'default': "https://images.pexels.com/photos/1571460/pexels-photo-1571460.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=2"
+        # First check for exact room type matches in common phrases
+        if 'living room' in prompt_lower or 'living' in prompt_lower:
+            return 'living'
+        elif 'bedroom' in prompt_lower or 'bed room' in prompt_lower:
+            return 'bedroom'
+        elif 'kitchen' in prompt_lower:
+            return 'kitchen'
+        elif 'bathroom' in prompt_lower or 'bath room' in prompt_lower:
+            return 'bathroom'
+        elif 'office' in prompt_lower or 'study' in prompt_lower:
+            return 'office'
+        elif 'dining' in prompt_lower:
+            return 'dining'
+        
+        # Fallback to more detailed matching
+        room_types = {
+            'living': ['living room', 'living', 'lounge'],
+            'bedroom': ['bedroom', 'bed room', 'master bedroom'],
+            'kitchen': ['kitchen', 'cooking', 'culinary'],
+            'bathroom': ['bathroom', 'bath room', 'washroom'],
+            'office': ['office', 'study', 'work'],
+            'dining': ['dining', 'dining room', 'eat']
         }
         
-        for room_key in fallback_images:
-            if room_key in room_type:
-                return fallback_images[room_key]
+        for room_key, keywords in room_types.items():
+            for keyword in keywords:
+                if keyword in prompt_lower:
+                    return room_key
         
-        return fallback_images['default']
+        return 'living'  # default
+    
+    def _extract_style(self, prompt: str) -> str:
+        """Extract design style from prompt"""
+        prompt_lower = prompt.lower()
+        
+        # Direct style matching
+        if 'modern' in prompt_lower:
+            return 'modern'
+        elif 'traditional' in prompt_lower or 'classic' in prompt_lower:
+            return 'traditional'
+        elif 'scandinavian' in prompt_lower or 'nordic' in prompt_lower:
+            return 'scandinavian'
+        elif 'industrial' in prompt_lower:
+            return 'industrial'
+        elif 'bohemian' in prompt_lower or 'boho' in prompt_lower:
+            return 'bohemian'
+        elif 'contemporary' in prompt_lower:
+            return 'modern'  # Map contemporary to modern
+        elif 'minimalist' in prompt_lower:
+            return 'scandinavian'  # Map minimalist to scandinavian
+        
+        # Fallback to detailed matching
+        styles = {
+            'modern': ['modern', 'contemporary', 'minimalist'],
+            'traditional': ['traditional', 'classic', 'vintage'],
+            'scandinavian': ['scandinavian', 'nordic', 'scandi'],
+            'industrial': ['industrial', 'loft', 'urban'],
+            'bohemian': ['bohemian', 'boho', 'eclectic']
+        }
+        
+        for style_key, keywords in styles.items():
+            for keyword in keywords:
+                if keyword in prompt_lower:
+                    return style_key
+        
+        return 'modern'  # default
+    
+    def _get_curated_image(self, room_type: str, style: str) -> str:
+        """Get curated high-quality images based on room type and style"""
+        print(f"DEBUG - Getting image for room_type: {room_type}, style: {style}")
+        
+        # Curated high-quality interior design images from Pexels
+        curated_images = {
+            'living': {
+                'modern': "https://images.pexels.com/photos/1571460/pexels-photo-1571460.jpeg",
+                'traditional': "https://images.pexels.com/photos/1648776/pexels-photo-1648776.jpeg",
+                'scandinavian': "https://images.pexels.com/photos/1571453/pexels-photo-1571453.jpeg",
+                'industrial': "https://images.pexels.com/photos/1080721/pexels-photo-1080721.jpeg",
+                'bohemian': "https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg"
+            },
+            'bedroom': {
+                'modern': "https://images.pexels.com/photos/164595/pexels-photo-164595.jpeg",
+                'traditional': "https://images.pexels.com/photos/1743229/pexels-photo-1743229.jpeg",
+                'scandinavian': "https://images.pexels.com/photos/1454806/pexels-photo-1454806.jpeg",
+                'industrial': "https://images.pexels.com/photos/1329711/pexels-photo-1329711.jpeg",
+                'bohemian': "https://images.pexels.com/photos/1080696/pexels-photo-1080696.jpeg"
+            },
+            'kitchen': {
+                'modern': "https://images.pexels.com/photos/2724748/pexels-photo-2724748.jpeg",
+                'traditional': "https://images.pexels.com/photos/1599791/pexels-photo-1599791.jpeg",
+                'scandinavian': "https://images.pexels.com/photos/2062426/pexels-photo-2062426.jpeg",
+                'industrial': "https://images.pexels.com/photos/2089698/pexels-photo-2089698.jpeg",
+                'bohemian': "https://images.pexels.com/photos/1599791/pexels-photo-1599791.jpeg"
+            },
+            'bathroom': {
+                'modern': "https://images.pexels.com/photos/1358912/pexels-photo-1358912.jpeg",
+                'traditional': "https://images.pexels.com/photos/1454806/pexels-photo-1454806.jpeg",
+                'scandinavian': "https://images.pexels.com/photos/1080696/pexels-photo-1080696.jpeg",
+                'industrial': "https://images.pexels.com/photos/1329711/pexels-photo-1329711.jpeg",
+                'bohemian': "https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg"
+            },
+            'office': {
+                'modern': "https://images.pexels.com/photos/667838/pexels-photo-667838.jpeg",
+                'traditional': "https://images.pexels.com/photos/1181406/pexels-photo-1181406.jpeg",
+                'scandinavian': "https://images.pexels.com/photos/1080696/pexels-photo-1080696.jpeg",
+                'industrial': "https://images.pexels.com/photos/1329711/pexels-photo-1329711.jpeg",
+                'bohemian': "https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg"
+            },
+            'dining': {
+                'modern': "https://images.pexels.com/photos/1395967/pexels-photo-1395967.jpeg",
+                'traditional': "https://images.pexels.com/photos/1648776/pexels-photo-1648776.jpeg",
+                'scandinavian': "https://images.pexels.com/photos/1571453/pexels-photo-1571453.jpeg",
+                'industrial': "https://images.pexels.com/photos/1080721/pexels-photo-1080721.jpeg",
+                'bohemian': "https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg"
+            }
+        }
+        
+        # Get the appropriate image based on room type and style
+        if room_type in curated_images and style in curated_images[room_type]:
+            selected_url = curated_images[room_type][style]
+            print(f"DEBUG - Found specific image: {selected_url}")
+            return selected_url
+        elif room_type in curated_images:
+            # Fallback to modern style if specific style not found
+            fallback_url = curated_images[room_type].get('modern', curated_images[room_type][list(curated_images[room_type].keys())[0]])
+            print(f"DEBUG - Using fallback for room: {fallback_url}")
+            return fallback_url
+        else:
+            def _get_fallback_image(self, prompt: str) -> str:
+                return "https://images.pexels.com/photos/1571460/pexels-photo-1571460.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=2"
     
     async def _generate_image_with_openai(self, prompt: str) -> str:
         """Generate image using OpenAI DALL-E"""
