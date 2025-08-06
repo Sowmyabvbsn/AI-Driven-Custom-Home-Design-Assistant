@@ -207,6 +207,10 @@ def main():
                     status_text.text("🧠 Generating layout descriptions...")
                     progress_bar.progress(25)
                     
+                    # Update progress for image generation
+                    progress_bar.progress(50)
+                    status_text.text("🎨 Generating AI layout images...")
+                    
                     # Generate layouts
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
@@ -215,8 +219,8 @@ def main():
                         generate_layout_ideas(preferences, st.session_state.ai_service)
                     )
                     
-                    progress_bar.progress(75)
-                    status_text.text("🖼️ Generating layout images...")
+                    progress_bar.progress(90)
+                    status_text.text("🖼️ Finalizing layout presentation...")
                     
                     if results:
                         # Save to session state

@@ -19,6 +19,18 @@ APP_CONFIG = {
     'default_image_size': '1024x1024',
     'image_qualities': ['standard', 'hd'],
     'default_image_quality': 'standard',
+
+    # Free AI Image Generation Services
+    'image_services': {
+        'pollinations': {
+            'base_url': 'https://image.pollinations.ai/prompt/',
+            'params': '?width=1024&height=1024&model=flux&enhance=true'
+        },
+        'huggingface': {
+            'api_url': 'https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0',
+            'model': 'stabilityai/stable-diffusion-xl-base-1.0'
+        }
+    },
     
     # UI Settings
     'theme_colors': {

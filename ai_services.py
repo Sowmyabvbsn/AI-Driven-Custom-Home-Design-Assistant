@@ -7,6 +7,8 @@ from datetime import datetime
 import streamlit as st
 import base64
 import io
+import replicate
+import os
 
 class AIService:
     def __init__(self, provider: str, api_key: str):
@@ -21,8 +23,6 @@ class AIService:
             if self.provider == "gemini":
                 genai.configure(api_key=self.api_key)
                 self.client = genai.GenerativeModel('gemini-1.5-flash')
-                # Initialize Veo3 for video/image generation
-                self.veo3_client = genai.GenerativeModel('gemini-1.5-flash')
             elif self.provider == "openai":
                 self.client = openai.OpenAI(api_key=self.api_key)
             else:
@@ -50,21 +50,119 @@ class AIService:
             return []
     
     async def generate_layout_image(self, description: str, preferences: Dict) -> Optional[str]:
-        """Generate layout image using AI"""
-        # Use preferences directly for more reliable image selection
-        room_type = self._map_room_type(preferences['room_type'])
-        style = self._map_style(preferences['style'])
-        
+        """Generate layout image using multiple free AI services"""
         try:
-            if self.provider == "gemini":
-                # Use preferences directly instead of parsing from description
-                return self._get_curated_image(room_type, style)
-            elif self.provider == "openai":
-                image_prompt = self._create_image_prompt(description, preferences)
-                return await self._generate_image_with_openai(image_prompt)
+            # Try multiple free services in order of preference
+            image_url = await self._generate_with_pollinations(description, preferences)
+            if image_url:
+                return image_url
+            
+            # Fallback to Hugging Face
+            image_url = await self._generate_with_huggingface(description, preferences)
+            if image_url:
+                return image_url
+            
+            # Final fallback to curated images
+            room_type = self._map_room_type(preferences['room_type'])
+            style = self._map_style(preferences['style'])
+            return self._get_curated_image(room_type, style)
         
         except Exception as e:
             st.error(f"Error generating image: {str(e)}")
+            # Return curated image as final fallback
+            room_type = self._map_room_type(preferences['room_type'])
+            style = self._map_style(preferences['style'])
+            return self._get_curated_image(room_type, style)
+    
+    async def _generate_with_pollinations(self, description: str, preferences: Dict) -> Optional[str]:
+        """Generate image using Pollinations AI (free service)"""
+        try:
+            # Create a detailed prompt for interior design
+            prompt = self._create_detailed_image_prompt(description, preferences)
+            
+            # Pollinations API endpoint
+            base_url = "https://image.pollinations.ai/prompt/"
+            
+            # URL encode the prompt
+            import urllib.parse
+            encoded_prompt = urllib.parse.quote(prompt)
+            
+            # Add parameters for better quality
+            params = "?width=1024&height=1024&model=flux&enhance=true"
+            
+            image_url = f"{base_url}{encoded_prompt}{params}"
+            
+            # Test if the URL is accessible
+            response = requests.head(image_url, timeout=10)
+            if response.status_code == 200:
+                return image_url
+            
+        except Exception as e:
+            print(f"Pollinations generation failed: {str(e)}")
+        
+        return None
+    
+    async def _generate_with_huggingface(self, description: str, preferences: Dict) -> Optional[str]:
+        """Generate image using Hugging Face Inference API (free tier)"""
+        try:
+            # Create detailed prompt
+            prompt = self._create_detailed_image_prompt(description, preferences)
+            
+            # Use a free model on Hugging Face
+            api_url = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0"
+            
+            headers = {
+                "Content-Type": "application/json",
+            }
+            
+            payload = {
+                "inputs": prompt,
+                "parameters": {
+                    "num_inference_steps": 20,
+                    "guidance_scale": 7.5,
+                    "width": 1024,
+                    "height": 1024
+                }
+            }
+            
+            response = requests.post(api_url, headers=headers, json=payload, timeout=30)
+            
+            if response.status_code == 200:
+                # Save the image temporarily and return a data URL
+                image_data = response.content
+                import base64
+                encoded_image = base64.b64encode(image_data).decode()
+                return f"data:image/png;base64,{encoded_image}"
+            
+        except Exception as e:
+            print(f"Hugging Face generation failed: {str(e)}")
+        
+        return None
+    
+    def _create_detailed_image_prompt(self, description: str, preferences: Dict) -> str:
+        """Create a detailed prompt optimized for image generation"""
+        room_type = preferences['room_type']
+        style = preferences['style']
+        colors = ', '.join(preferences.get('colors', ['neutral']))
+        features = ', '.join(preferences.get('features', []))
+        
+        prompt = f"""
+        Professional interior design photograph of a {style.lower()} {room_type.lower()}, 
+        {description[:200]}, 
+        color palette: {colors}, 
+        features: {features}, 
+        high-quality interior photography, 
+        well-lit, modern furniture, 
+        architectural digest style, 
+        clean composition, 
+        realistic lighting, 
+        4K resolution, 
+        professional interior design, 
+        contemporary home decor,
+        photorealistic rendering
+        """.strip().replace('\n', ' ').replace('  ', ' ')
+        
+        return prompt
     
     def _create_layout_prompt(self, preferences: Dict) -> str:
         """Create prompt for layout generation"""
@@ -93,23 +191,6 @@ class AIService:
         Make the layout unique and practical while staying within the specified parameters.
         """
     
-    def _create_image_prompt(self, description: str, preferences: Dict) -> str:
-        """Create prompt for image generation"""
-        return f"""
-        Create a photorealistic interior design image of a {preferences['room_type']} with {preferences['style']} style.
-        
-        Layout description: {description}
-        
-        Image requirements:
-        - High quality, photorealistic rendering
-        - {preferences['style']} interior design style
-        - {preferences['space_size']} space
-        - Color scheme incorporating {', '.join(preferences.get('colors', []))}
-        - Professional interior photography lighting
-        - Clean, modern composition
-        - Show furniture placement and room layout clearly
-        """
-    
     async def _generate_with_gemini(self, prompt: str) -> str:
         """Generate text using Gemini"""
         try:
@@ -133,37 +214,6 @@ class AIService:
             return response.choices[0].message.content
         except Exception as e:
             raise Exception(f"OpenAI generation error: {str(e)}")
-    
-    async def _generate_image_with_gemini(self, prompt: str) -> str:
-        """Generate image using Gemini Veo3"""
-        try:
-            # Since Veo3 is not yet available in the public API,
-            # we'll use a more sophisticated fallback system with better image selection
-            return await self._get_contextual_image(prompt)
-                
-        except Exception as e:
-            st.warning(f"Image generation failed: {str(e)}. Using contextual fallback.")
-            return await self._get_contextual_image(prompt)
-    
-    async def _get_contextual_image(self, prompt: str) -> str:
-        """Get contextual image based on room type and style"""
-        try:
-            # Extract room type and style from prompt with debugging
-            room_type = self._extract_room_type(prompt)
-            style = self._extract_style(prompt)
-            
-            # Debug logging
-            print(f"DEBUG - Prompt: {prompt[:100]}...")
-            print(f"DEBUG - Extracted room_type: {room_type}, style: {style}")
-            
-            # Get curated images based on room type and style
-            image_url = self._get_curated_image(room_type, style)
-            print(f"DEBUG - Selected image URL: {image_url}")
-            
-            return image_url
-            
-        except Exception as e:
-            return self._get_fallback_image("default")
     
     def _map_room_type(self, room_type: str) -> str:
         """Map UI room type to internal room type"""
@@ -198,154 +248,189 @@ class AIService:
         }
         return mapping.get(style, 'modern')
     
-    def _extract_room_type(self, prompt: str) -> str:
-        """Extract room type from prompt"""
-        prompt_lower = prompt.lower()
-        
-        # First check for exact room type matches in common phrases
-        if 'living room' in prompt_lower or 'living' in prompt_lower:
-            return 'living'
-        elif 'bedroom' in prompt_lower or 'bed room' in prompt_lower:
-            return 'bedroom'
-        elif 'kitchen' in prompt_lower:
-            return 'kitchen'
-        elif 'bathroom' in prompt_lower or 'bath room' in prompt_lower:
-            return 'bathroom'
-        elif 'office' in prompt_lower or 'study' in prompt_lower:
-            return 'office'
-        elif 'dining' in prompt_lower:
-            return 'dining'
-        
-        # Fallback to more detailed matching
-        room_types = {
-            'living': ['living room', 'living', 'lounge'],
-            'bedroom': ['bedroom', 'bed room', 'master bedroom'],
-            'kitchen': ['kitchen', 'cooking', 'culinary'],
-            'bathroom': ['bathroom', 'bath room', 'washroom'],
-            'office': ['office', 'study', 'work'],
-            'dining': ['dining', 'dining room', 'eat']
-        }
-        
-        for room_key, keywords in room_types.items():
-            for keyword in keywords:
-                if keyword in prompt_lower:
-                    return room_key
-        
-        return 'living'  # default
-    
-    def _extract_style(self, prompt: str) -> str:
-        """Extract design style from prompt"""
-        prompt_lower = prompt.lower()
-        
-        # Direct style matching
-        if 'modern' in prompt_lower:
-            return 'modern'
-        elif 'traditional' in prompt_lower or 'classic' in prompt_lower:
-            return 'traditional'
-        elif 'scandinavian' in prompt_lower or 'nordic' in prompt_lower:
-            return 'scandinavian'
-        elif 'industrial' in prompt_lower:
-            return 'industrial'
-        elif 'bohemian' in prompt_lower or 'boho' in prompt_lower:
-            return 'bohemian'
-        elif 'contemporary' in prompt_lower:
-            return 'modern'  # Map contemporary to modern
-        elif 'minimalist' in prompt_lower:
-            return 'scandinavian'  # Map minimalist to scandinavian
-        
-        # Fallback to detailed matching
-        styles = {
-            'modern': ['modern', 'contemporary', 'minimalist'],
-            'traditional': ['traditional', 'classic', 'vintage'],
-            'scandinavian': ['scandinavian', 'nordic', 'scandi'],
-            'industrial': ['industrial', 'loft', 'urban'],
-            'bohemian': ['bohemian', 'boho', 'eclectic']
-        }
-        
-        for style_key, keywords in styles.items():
-            for keyword in keywords:
-                if keyword in prompt_lower:
-                    return style_key
-        
-        return 'modern'  # default
-    
     def _get_curated_image(self, room_type: str, style: str) -> str:
         """Get curated high-quality images based on room type and style"""
-        print(f"DEBUG - Getting image for room_type: {room_type}, style: {style}")
-        
-        # Curated high-quality interior design images from Pexels
+        # Enhanced curated images with more variety
         curated_images = {
             'living': {
-                'modern': "https://images.pexels.com/photos/1571460/pexels-photo-1571460.jpeg",
-                'traditional': "https://images.pexels.com/photos/1648776/pexels-photo-1648776.jpeg",
-                'scandinavian': "https://images.pexels.com/photos/1571453/pexels-photo-1571453.jpeg",
-                'industrial': "https://images.pexels.com/photos/1080721/pexels-photo-1080721.jpeg",
-                'bohemian': "https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg"
+                'modern': [
+                    "https://images.pexels.com/photos/1571460/pexels-photo-1571460.jpeg",
+                    "https://images.pexels.com/photos/2062426/pexels-photo-2062426.jpeg",
+                    "https://images.pexels.com/photos/1080721/pexels-photo-1080721.jpeg"
+                ],
+                'traditional': [
+                    "https://images.pexels.com/photos/1648776/pexels-photo-1648776.jpeg",
+                    "https://images.pexels.com/photos/1743229/pexels-photo-1743229.jpeg",
+                    "https://images.pexels.com/photos/1395967/pexels-photo-1395967.jpeg"
+                ],
+                'scandinavian': [
+                    "https://images.pexels.com/photos/1571453/pexels-photo-1571453.jpeg",
+                    "https://images.pexels.com/photos/1454806/pexels-photo-1454806.jpeg",
+                    "https://images.pexels.com/photos/2062426/pexels-photo-2062426.jpeg"
+                ],
+                'industrial': [
+                    "https://images.pexels.com/photos/1080721/pexels-photo-1080721.jpeg",
+                    "https://images.pexels.com/photos/1329711/pexels-photo-1329711.jpeg",
+                    "https://images.pexels.com/photos/2089698/pexels-photo-2089698.jpeg"
+                ],
+                'bohemian': [
+                    "https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg",
+                    "https://images.pexels.com/photos/1080696/pexels-photo-1080696.jpeg",
+                    "https://images.pexels.com/photos/1743229/pexels-photo-1743229.jpeg"
+                ]
             },
             'bedroom': {
-                'modern': "https://images.pexels.com/photos/164595/pexels-photo-164595.jpeg",
-                'traditional': "https://images.pexels.com/photos/1743229/pexels-photo-1743229.jpeg",
-                'scandinavian': "https://images.pexels.com/photos/1454806/pexels-photo-1454806.jpeg",
-                'industrial': "https://images.pexels.com/photos/1329711/pexels-photo-1329711.jpeg",
-                'bohemian': "https://images.pexels.com/photos/1080696/pexels-photo-1080696.jpeg"
+                'modern': [
+                    "https://images.pexels.com/photos/164595/pexels-photo-164595.jpeg",
+                    "https://images.pexels.com/photos/1454806/pexels-photo-1454806.jpeg",
+                    "https://images.pexels.com/photos/1080696/pexels-photo-1080696.jpeg"
+                ],
+                'traditional': [
+                    "https://images.pexels.com/photos/1743229/pexels-photo-1743229.jpeg",
+                    "https://images.pexels.com/photos/1648776/pexels-photo-1648776.jpeg",
+                    "https://images.pexels.com/photos/164595/pexels-photo-164595.jpeg"
+                ],
+                'scandinavian': [
+                    "https://images.pexels.com/photos/1454806/pexels-photo-1454806.jpeg",
+                    "https://images.pexels.com/photos/1080696/pexels-photo-1080696.jpeg",
+                    "https://images.pexels.com/photos/164595/pexels-photo-164595.jpeg"
+                ],
+                'industrial': [
+                    "https://images.pexels.com/photos/1329711/pexels-photo-1329711.jpeg",
+                    "https://images.pexels.com/photos/1080696/pexels-photo-1080696.jpeg",
+                    "https://images.pexels.com/photos/164595/pexels-photo-164595.jpeg"
+                ],
+                'bohemian': [
+                    "https://images.pexels.com/photos/1080696/pexels-photo-1080696.jpeg",
+                    "https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg",
+                    "https://images.pexels.com/photos/1743229/pexels-photo-1743229.jpeg"
+                ]
             },
             'kitchen': {
-                'modern': "https://images.pexels.com/photos/2724748/pexels-photo-2724748.jpeg",
-                'traditional': "https://images.pexels.com/photos/1599791/pexels-photo-1599791.jpeg",
-                'scandinavian': "https://images.pexels.com/photos/2062426/pexels-photo-2062426.jpeg",
-                'industrial': "https://images.pexels.com/photos/2089698/pexels-photo-2089698.jpeg",
-                'bohemian': "https://images.pexels.com/photos/1599791/pexels-photo-1599791.jpeg"
+                'modern': [
+                    "https://images.pexels.com/photos/2724748/pexels-photo-2724748.jpeg",
+                    "https://images.pexels.com/photos/2062426/pexels-photo-2062426.jpeg",
+                    "https://images.pexels.com/photos/2089698/pexels-photo-2089698.jpeg"
+                ],
+                'traditional': [
+                    "https://images.pexels.com/photos/1599791/pexels-photo-1599791.jpeg",
+                    "https://images.pexels.com/photos/2724748/pexels-photo-2724748.jpeg",
+                    "https://images.pexels.com/photos/1648776/pexels-photo-1648776.jpeg"
+                ],
+                'scandinavian': [
+                    "https://images.pexels.com/photos/2062426/pexels-photo-2062426.jpeg",
+                    "https://images.pexels.com/photos/2724748/pexels-photo-2724748.jpeg",
+                    "https://images.pexels.com/photos/1599791/pexels-photo-1599791.jpeg"
+                ],
+                'industrial': [
+                    "https://images.pexels.com/photos/2089698/pexels-photo-2089698.jpeg",
+                    "https://images.pexels.com/photos/2724748/pexels-photo-2724748.jpeg",
+                    "https://images.pexels.com/photos/1599791/pexels-photo-1599791.jpeg"
+                ],
+                'bohemian': [
+                    "https://images.pexels.com/photos/1599791/pexels-photo-1599791.jpeg",
+                    "https://images.pexels.com/photos/2724748/pexels-photo-2724748.jpeg",
+                    "https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg"
+                ]
             },
             'bathroom': {
-                'modern': "https://images.pexels.com/photos/1358912/pexels-photo-1358912.jpeg",
-                'traditional': "https://images.pexels.com/photos/1454806/pexels-photo-1454806.jpeg",
-                'scandinavian': "https://images.pexels.com/photos/1080696/pexels-photo-1080696.jpeg",
-                'industrial': "https://images.pexels.com/photos/1329711/pexels-photo-1329711.jpeg",
-                'bohemian': "https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg"
+                'modern': [
+                    "https://images.pexels.com/photos/1358912/pexels-photo-1358912.jpeg",
+                    "https://images.pexels.com/photos/2062426/pexels-photo-2062426.jpeg",
+                    "https://images.pexels.com/photos/1080721/pexels-photo-1080721.jpeg"
+                ],
+                'traditional': [
+                    "https://images.pexels.com/photos/1454806/pexels-photo-1454806.jpeg",
+                    "https://images.pexels.com/photos/1358912/pexels-photo-1358912.jpeg",
+                    "https://images.pexels.com/photos/1648776/pexels-photo-1648776.jpeg"
+                ],
+                'scandinavian': [
+                    "https://images.pexels.com/photos/1080696/pexels-photo-1080696.jpeg",
+                    "https://images.pexels.com/photos/1358912/pexels-photo-1358912.jpeg",
+                    "https://images.pexels.com/photos/2062426/pexels-photo-2062426.jpeg"
+                ],
+                'industrial': [
+                    "https://images.pexels.com/photos/1329711/pexels-photo-1329711.jpeg",
+                    "https://images.pexels.com/photos/1358912/pexels-photo-1358912.jpeg",
+                    "https://images.pexels.com/photos/1080721/pexels-photo-1080721.jpeg"
+                ],
+                'bohemian': [
+                    "https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg",
+                    "https://images.pexels.com/photos/1358912/pexels-photo-1358912.jpeg",
+                    "https://images.pexels.com/photos/1080696/pexels-photo-1080696.jpeg"
+                ]
             },
             'office': {
-                'modern': "https://images.pexels.com/photos/667838/pexels-photo-667838.jpeg",
-                'traditional': "https://images.pexels.com/photos/1181406/pexels-photo-1181406.jpeg",
-                'scandinavian': "https://images.pexels.com/photos/1080696/pexels-photo-1080696.jpeg",
-                'industrial': "https://images.pexels.com/photos/1329711/pexels-photo-1329711.jpeg",
-                'bohemian': "https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg"
+                'modern': [
+                    "https://images.pexels.com/photos/667838/pexels-photo-667838.jpeg",
+                    "https://images.pexels.com/photos/1181406/pexels-photo-1181406.jpeg",
+                    "https://images.pexels.com/photos/1080721/pexels-photo-1080721.jpeg"
+                ],
+                'traditional': [
+                    "https://images.pexels.com/photos/1181406/pexels-photo-1181406.jpeg",
+                    "https://images.pexels.com/photos/667838/pexels-photo-667838.jpeg",
+                    "https://images.pexels.com/photos/1648776/pexels-photo-1648776.jpeg"
+                ],
+                'scandinavian': [
+                    "https://images.pexels.com/photos/1080696/pexels-photo-1080696.jpeg",
+                    "https://images.pexels.com/photos/667838/pexels-photo-667838.jpeg",
+                    "https://images.pexels.com/photos/1181406/pexels-photo-1181406.jpeg"
+                ],
+                'industrial': [
+                    "https://images.pexels.com/photos/1329711/pexels-photo-1329711.jpeg",
+                    "https://images.pexels.com/photos/667838/pexels-photo-667838.jpeg",
+                    "https://images.pexels.com/photos/1080721/pexels-photo-1080721.jpeg"
+                ],
+                'bohemian': [
+                    "https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg",
+                    "https://images.pexels.com/photos/667838/pexels-photo-667838.jpeg",
+                    "https://images.pexels.com/photos/1181406/pexels-photo-1181406.jpeg"
+                ]
             },
             'dining': {
-                'modern': "https://images.pexels.com/photos/1395967/pexels-photo-1395967.jpeg",
-                'traditional': "https://images.pexels.com/photos/1648776/pexels-photo-1648776.jpeg",
-                'scandinavian': "https://images.pexels.com/photos/1571453/pexels-photo-1571453.jpeg",
-                'industrial': "https://images.pexels.com/photos/1080721/pexels-photo-1080721.jpeg",
-                'bohemian': "https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg"
+                'modern': [
+                    "https://images.pexels.com/photos/1395967/pexels-photo-1395967.jpeg",
+                    "https://images.pexels.com/photos/2062426/pexels-photo-2062426.jpeg",
+                    "https://images.pexels.com/photos/1080721/pexels-photo-1080721.jpeg"
+                ],
+                'traditional': [
+                    "https://images.pexels.com/photos/1648776/pexels-photo-1648776.jpeg",
+                    "https://images.pexels.com/photos/1395967/pexels-photo-1395967.jpeg",
+                    "https://images.pexels.com/photos/1743229/pexels-photo-1743229.jpeg"
+                ],
+                'scandinavian': [
+                    "https://images.pexels.com/photos/1571453/pexels-photo-1571453.jpeg",
+                    "https://images.pexels.com/photos/1395967/pexels-photo-1395967.jpeg",
+                    "https://images.pexels.com/photos/2062426/pexels-photo-2062426.jpeg"
+                ],
+                'industrial': [
+                    "https://images.pexels.com/photos/1080721/pexels-photo-1080721.jpeg",
+                    "https://images.pexels.com/photos/1395967/pexels-photo-1395967.jpeg",
+                    "https://images.pexels.com/photos/1329711/pexels-photo-1329711.jpeg"
+                ],
+                'bohemian': [
+                    "https://images.pexels.com/photos/1457842/pexels-photo-1457842.jpeg",
+                    "https://images.pexels.com/photos/1395967/pexels-photo-1395967.jpeg",
+                    "https://images.pexels.com/photos/1743229/pexels-photo-1743229.jpeg"
+                ]
             }
         }
         
-        # Get the appropriate image based on room type and style
+        # Get images for the specific room type and style
         if room_type in curated_images and style in curated_images[room_type]:
-            selected_url = curated_images[room_type][style]
-            print(f"DEBUG - Found specific image: {selected_url}")
-            return selected_url
+            images = curated_images[room_type][style]
+            # Use a simple hash to vary the selection based on current time
+            import time
+            index = int(time.time()) % len(images)
+            return images[index]
         elif room_type in curated_images:
             # Fallback to modern style if specific style not found
-            fallback_url = curated_images[room_type].get('modern', curated_images[room_type][list(curated_images[room_type].keys())[0]])
-            print(f"DEBUG - Using fallback for room: {fallback_url}")
-            return fallback_url
+            fallback_images = curated_images[room_type].get('modern', list(curated_images[room_type].values())[0])
+            index = int(time.time()) % len(fallback_images)
+            return fallback_images[index]
         else:
-            def _get_fallback_image(self, prompt: str) -> str:
-                return "https://images.pexels.com/photos/1571460/pexels-photo-1571460.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=2"
-    
-    async def _generate_image_with_openai(self, prompt: str) -> str:
-        """Generate image using OpenAI DALL-E"""
-        try:
-            response = self.client.images.generate(
-                model="dall-e-3",
-                prompt=prompt,
-                size="1024x1024",
-                quality="standard",
-                n=1
-            )
-            return response.data[0].url
-        except Exception as e:
-            raise Exception(f"OpenAI image generation error: {str(e)}")
+            # Final fallback
+            return "https://images.pexels.com/photos/1571460/pexels-photo-1571460.jpeg"
     
     def _parse_layout_response(self, response: str) -> List[str]:
         """Parse AI response into individual layout descriptions"""

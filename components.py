@@ -181,14 +181,18 @@ def render_layout_results(layouts: List[Dict]):
             with col2:
                 # Layout image
                 if layout.get('image_url'):
-                    st.markdown("**🎨 Curated Interior Design Visualization:**")
-                    st.image(
-                        layout['image_url'],
-                        caption="High-quality interior design reference image",
-                        use_column_width=True
-                    )
+                    st.markdown("**🎨 AI-Generated Layout Visualization:**")
+                    try:
+                        st.image(
+                            layout['image_url'],
+                            caption="AI-generated interior design visualization",
+                            use_column_width=True
+                        )
+                    except Exception as e:
+                        st.error(f"Failed to load image: {str(e)}")
+                        st.info("🎨 Using fallback visualization...")
                 else:
-                    st.info("🎨 Loading interior design visualization...")
+                    st.info("🎨 Generating AI layout visualization...")
             
             st.markdown("</div>", unsafe_allow_html=True)
             st.markdown("---")
