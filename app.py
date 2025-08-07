@@ -136,9 +136,21 @@ def main():
             help=f"Enter your {provider.upper()} API key"
         )
         
+        # Hugging Face API key for image generation
+        hf_api_key = st.text_input(
+            "Hugging Face API Key (for images)",
+            type="password",
+            help="Enter your Hugging Face API key for better image generation"
+        )
+        
         if api_key:
+            # Pass both API keys to the service
             st.session_state.ai_service = AIService(provider=provider, api_key=api_key)
+            if hf_api_key:
+                st.session_state.ai_service.hf_api_key = hf_api_key
             st.success(f"✅ {provider.upper()} configured successfully!")
+            if hf_api_key:
+                st.success("✅ Hugging Face API configured for enhanced image generation!")
         
         st.markdown("</div>", unsafe_allow_html=True)
         

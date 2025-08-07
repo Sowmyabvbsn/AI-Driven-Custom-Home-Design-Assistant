@@ -9,11 +9,13 @@ import base64
 import io
 import replicate
 import os
+import json
 
 class AIService:
     def __init__(self, provider: str, api_key: str):
         self.provider = provider
         self.api_key = api_key
+        self.hf_api_key = None  # Will be set from Streamlit UI
         self.current_provider = provider
         self._setup_client()
     
@@ -52,13 +54,13 @@ class AIService:
     async def generate_layout_image(self, description: str, preferences: Dict) -> Optional[str]:
         """Generate layout image using multiple free AI services"""
         try:
-            # Try multiple free services in order of preference
-            image_url = await self._generate_with_pollinations(description, preferences)
+            # Try Hugging Face first (most reliable)
+            image_url = await self._generate_with_huggingface(description, preferences)
             if image_url:
                 return image_url
             
-            # Fallback to Hugging Face
-            image_url = await self._generate_with_huggingface(description, preferences)
+            # Fallback to Pollinations
+            image_url = await self._generate_with_pollinations(description, preferences)
             if image_url:
                 return image_url
             
@@ -103,41 +105,78 @@ class AIService:
         return None
     
     async def _generate_with_huggingface(self, description: str, preferences: Dict) -> Optional[str]:
-        """Generate image using Hugging Face Inference API (free tier)"""
+        """Generate image using Hugging Face Inference API with multiple model fallbacks"""
         try:
             # Create detailed prompt
             prompt = self._create_detailed_image_prompt(description, preferences)
             
-            # Use a free model on Hugging Face
-            api_url = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0"
+            # Try multiple models in order of preference
+            models = [
+                "stabilityai/stable-diffusion-xl-base-1.0",
+                "runwayml/stable-diffusion-v1-5",
+                "stabilityai/stable-diffusion-2-1",
+                "CompVis/stable-diffusion-v1-4"
+            ]
             
-            headers = {
-                "Content-Type": "application/json",
-            }
-            
-            payload = {
-                "inputs": prompt,
-                "parameters": {
-                    "num_inference_steps": 20,
-                    "guidance_scale": 7.5,
-                    "width": 1024,
-                    "height": 1024
-                }
-            }
-            
-            response = requests.post(api_url, headers=headers, json=payload, timeout=30)
-            
-            if response.status_code == 200:
-                # Save the image temporarily and return a data URL
-                image_data = response.content
-                import base64
-                encoded_image = base64.b64encode(image_data).decode()
-                return f"data:image/png;base64,{encoded_image}"
+            for model in models:
+                try:
+                    api_url = f"https://api-inference.huggingface.co/models/{model}"
+                    
+                    headers = {
+                        "Content-Type": "application/json",
+                        "x-use-cache": "false",
+                    }
+                    
+                    # Add authorization header if HF API key is available
+                    if hasattr(self, 'hf_api_key') and self.hf_api_key:
+                        headers["Authorization"] = f"Bearer {self.hf_api_key}"
+                    
+                    # Calculate dimensions based on room type
+                    dimensions = self._get_image_dimensions(preferences.get('space_size', 'Medium'))
+                    
+                    payload = {
+                        "inputs": prompt,
+                        "parameters": {
+                            "num_inference_steps": 25,
+                            "guidance_scale": 7.5,
+                            "width": dimensions['width'],
+                            "height": dimensions['height'],
+                            "negative_prompt": "blurry, low quality, distorted, ugly, bad anatomy, watermark, text, signature"
+                        }
+                    }
+                    
+                    response = requests.post(api_url, headers=headers, json=payload, timeout=60)
+                    
+                    if response.status_code == 200:
+                        # Save the image temporarily and return a data URL
+                        image_data = response.content
+                        encoded_image = base64.b64encode(image_data).decode()
+                        return f"data:image/png;base64,{encoded_image}"
+                    elif response.status_code == 503:
+                        # Model is loading, try next model
+                        continue
+                    else:
+                        print(f"Model {model} failed with status {response.status_code}")
+                        continue
+                        
+                except Exception as model_error:
+                    print(f"Model {model} failed: {str(model_error)}")
+                    continue
             
         except Exception as e:
             print(f"Hugging Face generation failed: {str(e)}")
         
         return None
+    
+    def _get_image_dimensions(self, space_size: str) -> Dict[str, int]:
+        """Get appropriate image dimensions based on space size"""
+        size_map = {
+            'Small (< 100 sq ft)': {'width': 768, 'height': 768},
+            'Medium (100-200 sq ft)': {'width': 1024, 'height': 768},
+            'Large (200-400 sq ft)': {'width': 1024, 'height': 1024},
+            'Very Large (400+ sq ft)': {'width': 1024, 'height': 768}
+        }
+        return size_map.get(space_size, {'width': 1024, 'height': 768})
     
     def _create_detailed_image_prompt(self, description: str, preferences: Dict) -> str:
         """Create a detailed prompt optimized for image generation"""
@@ -147,19 +186,11 @@ class AIService:
         features = ', '.join(preferences.get('features', []))
         
         prompt = f"""
-        Professional interior design photograph of a {style.lower()} {room_type.lower()}, 
-        {description[:200]}, 
-        color palette: {colors}, 
-        features: {features}, 
-        high-quality interior photography, 
-        well-lit, modern furniture, 
-        architectural digest style, 
-        clean composition, 
-        realistic lighting, 
-        4K resolution, 
-        professional interior design, 
-        contemporary home decor,
-        photorealistic rendering
+        A beautiful {style.lower()} {room_type.lower()} interior design, {description[:150]}, 
+        featuring {colors} color palette, {features}, professional interior photography, 
+        high quality, well-lit, clean modern furniture, architectural digest style, 
+        realistic lighting, photorealistic, detailed textures, contemporary home decor, 
+        interior design magazine quality, sharp focus, 8k resolution
         """.strip().replace('\n', ' ').replace('  ', ' ')
         
         return prompt

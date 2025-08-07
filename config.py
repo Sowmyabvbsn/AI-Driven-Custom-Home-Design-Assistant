@@ -119,7 +119,6 @@ APP_CONFIG = {
 # API Configuration Templates
 GEMINI_CONFIG = {
     'model': 'gemini-1.5-flash',
-    'veo3_model': 'veo3',  # Veo3 model identifier
     'temperature': 0.7,
     'max_tokens': 1500,
     'image_generation': {
@@ -134,6 +133,19 @@ OPENAI_CONFIG = {
     'image_model': 'dall-e-3', 
     'temperature': 0.7,
     'max_tokens': 1500
+}
+
+HUGGINGFACE_CONFIG = {
+    'models': [
+        'stabilityai/stable-diffusion-xl-base-1.0',
+        'runwayml/stable-diffusion-v1-5', 
+        'stabilityai/stable-diffusion-2-1',
+        'CompVis/stable-diffusion-v1-4'
+    ],
+    'default_params': {
+        'num_inference_steps': 25,
+        'guidance_scale': 7.5
+    }
 }
 
 # Prompt Templates
