@@ -15,7 +15,7 @@ class AIService:
     def __init__(self, provider: str, api_key: str):
         self.provider = provider
         self.api_key = api_key
-        self.hf_api_key = None  # Will be set from Streamlit UI
+        self.hf_api_key = None 
         self.current_provider = provider
         self._setup_client()
     
@@ -42,10 +42,8 @@ class AIService:
                 response = await self._generate_with_gemini(prompt)
             elif self.provider == "openai":
                 response = await self._generate_with_openai(prompt)
-            
-            # Parse response into multiple layout ideas
             layouts = self._parse_layout_response(response)
-            return layouts[:1]  # Return only one layout
+            return layouts[:1]  
         
         except Exception as e:
             st.error(f"Error generating layouts: {str(e)}")
@@ -54,19 +52,15 @@ class AIService:
     async def generate_layout_image(self, description: str, preferences: Dict) -> Optional[str]:
         """Generate layout image using multiple free AI services"""
         try:
-            # Try Pollinations first (most reliable and free)
             print("🎨 Trying Pollinations AI...")
             image_url = await self._generate_with_pollinations(description, preferences)
             if image_url:
                 return image_url
-            
-            # Try Hugging Face as fallback
             print("🎨 Trying Hugging Face...")
             image_url = await self._generate_with_huggingface(description, preferences)
             if image_url:
                 return image_url
-            
-            # Final fallback to curated images
+        
             print("🎨 Using curated fallback image...")
             room_type = self._map_room_type(preferences['room_type'])
             style = self._map_style(preferences['style'])
@@ -74,7 +68,6 @@ class AIService:
         
         except Exception as e:
             st.error(f"Error generating image: {str(e)}")
-            # Return curated image as final fallback
             room_type = self._map_room_type(preferences['room_type'])
             style = self._map_style(preferences['style'])
             return self._get_curated_image(room_type, style)
@@ -82,24 +75,17 @@ class AIService:
     async def _generate_with_pollinations(self, description: str, preferences: Dict) -> Optional[str]:
         """Generate image using Pollinations AI (free service)"""
         try:
-            # Create a detailed prompt for interior design
             prompt = self._create_detailed_image_prompt(description, preferences)
             print(f"🌸 Pollinations prompt: {prompt}")
             
-            # Pollinations API endpoint
             base_url = "https://image.pollinations.ai/prompt/"
             
-            # URL encode the prompt
             import urllib.parse
             encoded_prompt = urllib.parse.quote(prompt)
-            
-            # Add parameters for better quality
             params = "?width=512&height=512&model=flux&enhance=true&nologo=true"
             
             image_url = f"{base_url}{encoded_prompt}{params}"
             print(f"🌸 Pollinations URL: {image_url}")
-            
-            # Test if the URL is accessible
             response = requests.get(image_url, timeout=30)
             if response.status_code == 200:
                 print("✅ Pollinations image generated successfully!")
@@ -118,19 +104,13 @@ class AIService:
             if not hasattr(self, 'hf_api_key') or not self.hf_api_key:
                 print("❌ No Hugging Face API key provided")
                 return None
-            
-            # Create detailed prompt
             prompt = self._create_detailed_image_prompt(description, preferences)
             print(f"🎨 Image prompt: {prompt}")
-            
-            # Use working Hugging Face models (updated model names)
             models = [
                 "stabilityai/stable-diffusion-xl-base-1.0",
                 "CompVis/stable-diffusion-v1-4",
                 "runwayml/stable-diffusion-v1-5"
             ]
-            
-            # Calculate dimensions exactly like JavaScript
             dimensions = self._get_image_dimensions_js_style(preferences.get('space_size', 'Medium'))
             print(f"📐 Image dimensions: {dimensions}")
             
@@ -143,8 +123,6 @@ class AIService:
                         "Authorization": f"Bearer {self.hf_api_key}",
                         "Content-Type": "application/json",
                     }
-                    
-                    # Simplified payload that works with most models
                     payload = {
                         "inputs": prompt,
                         "parameters": {}
@@ -160,7 +138,6 @@ class AIService:
                         content_type = response.headers.get('content-type', '')
                         print(f"📄 Content type: {content_type}")
                         
-                        # Check if we got an actual image
                         if 'image' in content_type and len(response.content) > 1000:
                             image_data = response.content
                             encoded_image = base64.b64encode(image_data).decode()
@@ -198,23 +175,16 @@ class AIService:
     
     def _get_image_dimensions_js_style(self, space_size: str) -> Dict[str, int]:
         """Get image dimensions matching JavaScript implementation"""
-        # Use the same logic as your JavaScript getImageDimensions function
         base_size = 512
-        aspect_ratio = "1/1"  # Default square aspect ratio
-        
-        # Parse aspect ratio
+        aspect_ratio = "1/1"
         width_ratio, height_ratio = map(int, aspect_ratio.split("/"))
         
-        # Calculate dimensions like JavaScript
         scale_factor = base_size / (width_ratio * height_ratio) ** 0.5
         calculated_width = round(width_ratio * scale_factor)
         calculated_height = round(height_ratio * scale_factor)
-        
-        # Round to nearest 16 (like JavaScript)
+     
         calculated_width = (calculated_width // 16) * 16
         calculated_height = (calculated_height // 16) * 16
-        
-        # Ensure minimum size
         if calculated_width < 512:
             calculated_width = 512
         if calculated_height < 512:
@@ -234,8 +204,6 @@ class AIService:
         room_type = preferences['room_type']
         style = preferences['style']
         colors = ', '.join(preferences.get('colors', ['white', 'gray']))
-        
-        # Create a prompt similar to your JavaScript examples
         prompt = f"A beautiful {style.lower()} {room_type.lower()} interior design with {colors} color scheme, professional interior photography, high quality, well-lit, photorealistic"
         
         return prompt
@@ -326,7 +294,6 @@ class AIService:
     
     def _get_curated_image(self, room_type: str, style: str) -> str:
         """Get curated high-quality images based on room type and style"""
-        # Enhanced curated images with more variety
         curated_images = {
             'living': {
                 'modern': [
@@ -492,39 +459,29 @@ class AIService:
             }
         }
         
-        # Get images for the specific room type and style
         if room_type in curated_images and style in curated_images[room_type]:
             images = curated_images[room_type][style]
-            # Use a simple hash to vary the selection based on current time
             import time
             index = int(time.time()) % len(images)
             return images[index]
         elif room_type in curated_images:
-            # Fallback to modern style if specific style not found
             fallback_images = curated_images[room_type].get('modern', list(curated_images[room_type].values())[0])
             index = int(time.time()) % len(fallback_images)
             return fallback_images[index]
         else:
-            # Final fallback
             return "https://images.pexels.com/photos/1571460/pexels-photo-1571460.jpeg"
     
     def _parse_layout_response(self, response: str) -> List[str]:
         """Parse AI response into individual layout descriptions"""
         layouts = []
-        
-        # Split by layout markers
         parts = response.split("LAYOUT")
         
-        for part in parts[1:]:  # Skip first empty part
-            # Clean up the layout description
+        for part in parts[1:]: 
             layout_text = part.strip()
             if layout_text:
-                # Remove the number prefix and clean up
                 layout_desc = layout_text.split(":", 1)[-1].strip()
                 if layout_desc:
                     layouts.append(layout_desc)
-        
-        # If parsing fails, return the whole response as one layout
         if not layouts and response.strip():
             layouts = [response.strip()]
         

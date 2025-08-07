@@ -8,16 +8,12 @@ from ai_services import AIService
 from components import render_header, render_preferences_form, render_layout_results
 from utils import save_layout_to_session, get_session_layouts, export_layouts_to_json
 from config import APP_CONFIG
-
-# Configure Streamlit page
 st.set_page_config(
     page_title="AI Home Layout Generator",
     page_icon="🏡",
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-# Load custom CSS
 def load_css():
     st.markdown("""
     <style>
@@ -84,12 +80,10 @@ def initialize_session_state():
 async def generate_layout_ideas(preferences: Dict, ai_service: AIService) -> List[Dict]:
     """Generate layout ideas using AI service"""
     try:
-        # Generate layout descriptions
         layout_descriptions = await ai_service.generate_layout_descriptions(preferences)
         
         results = []
         for i, description in enumerate(layout_descriptions):
-            # Generate image for each layout
             image_url = await ai_service.generate_layout_image(description, preferences)
             
             result = {
@@ -113,30 +107,22 @@ def main():
     load_css()
     initialize_session_state()
     
-    # Render header
     render_header()
-    
-    # Sidebar for API configuration and settings
     with st.sidebar:
         st.markdown("<div class='sidebar-section'>", unsafe_allow_html=True)
         st.subheader("🔧 AI Configuration")
         
-        # API provider selection
         provider = st.selectbox(
             "Select AI Provider",
             options=["gemini", "openai"],
             index=0,
             help="Choose your preferred AI provider for generating layouts"
         )
-        
-        # API key input
         api_key = st.text_input(
             f"{provider.upper()} API Key",
             type="password",
             help=f"Enter your {provider.upper()} API key"
         )
-        
-        # Hugging Face API key for image generation
         hf_api_key = st.text_input(
             "Hugging Face API Key (for images)",
             type="password",
@@ -161,8 +147,6 @@ def main():
             st.warning("⚠️ Please enter your AI provider API key to get started.")
         
         st.markdown("</div>", unsafe_allow_html=True)
-        
-        # Generation settings
         st.markdown("<div class='sidebar-section'>", unsafe_allow_html=True)
         st.subheader("⚙️ Generation Settings")
         
@@ -176,8 +160,6 @@ def main():
         )
         
         st.markdown("</div>", unsafe_allow_html=True)
-        
-        # History and export
         if st.session_state.generated_layouts:
             st.markdown("<div class='sidebar-section'>", unsafe_allow_html=True)
             st.subheader("📋 Export Options")
@@ -196,42 +178,34 @@ def main():
                 st.rerun()
             
             st.markdown("</div>", unsafe_allow_html=True)
-    
-    # Main content area
     col1, col2 = st.columns([1, 2])
     
     with col1:
         st.subheader("🏠 Layout Preferences")
         
-        # Check if AI service is configured
         if not st.session_state.ai_service:
             st.warning("⚠️ Please configure your AI provider in the sidebar to get started.")
             st.stop()
-        
-        # Render preferences form
+
         preferences = render_preferences_form()
-        
-        # Generate button
+    
         if st.button("✨ Generate Layout Ideas", type="primary", use_container_width=True):
             if not preferences:
                 st.error("Please fill in all required preferences.")
                 return
             
             with st.spinner("🎨 Generating your personalized home layouts..."):
-                # Create progress bar
                 progress_bar = st.progress(0)
                 status_text = st.empty()
                 
                 try:
-                    # Update progress
+
                     status_text.text("🧠 Generating layout descriptions...")
                     progress_bar.progress(25)
-                    
-                    # Update progress for image generation
+
                     progress_bar.progress(50)
                     status_text.text("🎨 Generating AI layout images...")
-                    
-                    # Generate layouts
+                
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
                     
