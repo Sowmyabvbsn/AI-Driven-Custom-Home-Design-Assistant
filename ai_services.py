@@ -54,17 +54,20 @@ class AIService:
     async def generate_layout_image(self, description: str, preferences: Dict) -> Optional[str]:
         """Generate layout image using multiple free AI services"""
         try:
-            # Try Hugging Face first (most reliable)
-            image_url = await self._generate_with_huggingface(description, preferences)
-            if image_url:
-                return image_url
-            
-            # Fallback to Pollinations
+            # Try Pollinations first (most reliable and free)
+            print("🎨 Trying Pollinations AI...")
             image_url = await self._generate_with_pollinations(description, preferences)
             if image_url:
                 return image_url
             
+            # Try Hugging Face as fallback
+            print("🎨 Trying Hugging Face...")
+            image_url = await self._generate_with_huggingface(description, preferences)
+            if image_url:
+                return image_url
+            
             # Final fallback to curated images
+            print("🎨 Using curated fallback image...")
             room_type = self._map_room_type(preferences['room_type'])
             style = self._map_style(preferences['style'])
             return self._get_curated_image(room_type, style)
@@ -81,6 +84,7 @@ class AIService:
         try:
             # Create a detailed prompt for interior design
             prompt = self._create_detailed_image_prompt(description, preferences)
+            print(f"🌸 Pollinations prompt: {prompt}")
             
             # Pollinations API endpoint
             base_url = "https://image.pollinations.ai/prompt/"
@@ -90,108 +94,149 @@ class AIService:
             encoded_prompt = urllib.parse.quote(prompt)
             
             # Add parameters for better quality
-            params = "?width=1024&height=1024&model=flux&enhance=true"
+            params = "?width=512&height=512&model=flux&enhance=true&nologo=true"
             
             image_url = f"{base_url}{encoded_prompt}{params}"
+            print(f"🌸 Pollinations URL: {image_url}")
             
             # Test if the URL is accessible
-            response = requests.head(image_url, timeout=10)
+            response = requests.get(image_url, timeout=30)
             if response.status_code == 200:
+                print("✅ Pollinations image generated successfully!")
                 return image_url
+            else:
+                print(f"❌ Pollinations failed with status: {response.status_code}")
             
         except Exception as e:
-            print(f"Pollinations generation failed: {str(e)}")
+            print(f"❌ Pollinations generation failed: {str(e)}")
         
         return None
     
     async def _generate_with_huggingface(self, description: str, preferences: Dict) -> Optional[str]:
         """Generate image using Hugging Face Inference API with multiple model fallbacks"""
         try:
+            if not hasattr(self, 'hf_api_key') or not self.hf_api_key:
+                print("❌ No Hugging Face API key provided")
+                return None
+            
             # Create detailed prompt
             prompt = self._create_detailed_image_prompt(description, preferences)
+            print(f"🎨 Image prompt: {prompt}")
             
-            # Try multiple models in order of preference
+            # Use working Hugging Face models (updated model names)
             models = [
                 "stabilityai/stable-diffusion-xl-base-1.0",
-                "runwayml/stable-diffusion-v1-5",
-                "stabilityai/stable-diffusion-2-1",
-                "CompVis/stable-diffusion-v1-4"
+                "CompVis/stable-diffusion-v1-4",
+                "runwayml/stable-diffusion-v1-5"
             ]
+            
+            # Calculate dimensions exactly like JavaScript
+            dimensions = self._get_image_dimensions_js_style(preferences.get('space_size', 'Medium'))
+            print(f"📐 Image dimensions: {dimensions}")
             
             for model in models:
                 try:
                     api_url = f"https://api-inference.huggingface.co/models/{model}"
+                    print(f"🔄 Trying model: {model}")
                     
                     headers = {
+                        "Authorization": f"Bearer {self.hf_api_key}",
                         "Content-Type": "application/json",
-                        "x-use-cache": "false",
                     }
                     
-                    # Add authorization header if HF API key is available
-                    if hasattr(self, 'hf_api_key') and self.hf_api_key:
-                        headers["Authorization"] = f"Bearer {self.hf_api_key}"
-                    
-                    # Calculate dimensions based on room type
-                    dimensions = self._get_image_dimensions(preferences.get('space_size', 'Medium'))
-                    
+                    # Simplified payload that works with most models
                     payload = {
                         "inputs": prompt,
-                        "parameters": {
-                            "num_inference_steps": 25,
-                            "guidance_scale": 7.5,
-                            "width": dimensions['width'],
-                            "height": dimensions['height'],
-                            "negative_prompt": "blurry, low quality, distorted, ugly, bad anatomy, watermark, text, signature"
-                        }
+                        "parameters": {}
                     }
                     
-                    response = requests.post(api_url, headers=headers, json=payload, timeout=60)
+                    print(f"📤 Sending request to: {api_url}")
+                    print(f"📦 Payload: {json.dumps(payload, indent=2)}")
+                    
+                    response = requests.post(api_url, headers=headers, json=payload, timeout=30)
+                    print(f"📥 Response status: {response.status_code}")
                     
                     if response.status_code == 200:
-                        # Save the image temporarily and return a data URL
-                        image_data = response.content
-                        encoded_image = base64.b64encode(image_data).decode()
-                        return f"data:image/png;base64,{encoded_image}"
-                    elif response.status_code == 503:
-                        # Model is loading, try next model
+                        content_type = response.headers.get('content-type', '')
+                        print(f"📄 Content type: {content_type}")
+                        
+                        # Check if we got an actual image
+                        if 'image' in content_type and len(response.content) > 1000:
+                            image_data = response.content
+                            encoded_image = base64.b64encode(image_data).decode()
+                            print(f"✅ Successfully generated image with {model}")
+                            return f"data:image/png;base64,{encoded_image}"
+                        else:
+                            try:
+                                error_data = response.json()
+                                print(f"❌ API returned JSON error: {error_data}")
+                                continue
+                            except json.JSONDecodeError:
+                                print(f"❌ Invalid response format from {model}")
+                                continue
+                    
+                    elif response.status_code in [503, 404]:
+                        print(f"❌ Model {model} unavailable ({response.status_code}), trying next...")
+                        continue
+                    elif response.status_code == 429:
+                        print(f"Rate limited for model {model}, trying next...")
                         continue
                     else:
-                        print(f"Model {model} failed with status {response.status_code}")
+                        print(f"❌ Model {model} failed ({response.status_code})")
                         continue
                         
                 except Exception as model_error:
-                    print(f"Model {model} failed: {str(model_error)}")
+                    print(f"❌ Exception with model {model}: {str(model_error)}")
                     continue
+            
+            print("❌ All Hugging Face models failed")
             
         except Exception as e:
             print(f"Hugging Face generation failed: {str(e)}")
         
         return None
     
-    def _get_image_dimensions(self, space_size: str) -> Dict[str, int]:
-        """Get appropriate image dimensions based on space size"""
+    def _get_image_dimensions_js_style(self, space_size: str) -> Dict[str, int]:
+        """Get image dimensions matching JavaScript implementation"""
+        # Use the same logic as your JavaScript getImageDimensions function
+        base_size = 512
+        aspect_ratio = "1/1"  # Default square aspect ratio
+        
+        # Parse aspect ratio
+        width_ratio, height_ratio = map(int, aspect_ratio.split("/"))
+        
+        # Calculate dimensions like JavaScript
+        scale_factor = base_size / (width_ratio * height_ratio) ** 0.5
+        calculated_width = round(width_ratio * scale_factor)
+        calculated_height = round(height_ratio * scale_factor)
+        
+        # Round to nearest 16 (like JavaScript)
+        calculated_width = (calculated_width // 16) * 16
+        calculated_height = (calculated_height // 16) * 16
+        
+        # Ensure minimum size
+        if calculated_width < 512:
+            calculated_width = 512
+        if calculated_height < 512:
+            calculated_height = 512
+            
         size_map = {
-            'Small (< 100 sq ft)': {'width': 768, 'height': 768},
-            'Medium (100-200 sq ft)': {'width': 1024, 'height': 768},
-            'Large (200-400 sq ft)': {'width': 1024, 'height': 1024},
-            'Very Large (400+ sq ft)': {'width': 1024, 'height': 768}
+            'Small (< 100 sq ft)': {'width': calculated_width, 'height': calculated_height},
+            'Medium (100-200 sq ft)': {'width': calculated_width, 'height': calculated_height},
+            'Large (200-400 sq ft)': {'width': calculated_width, 'height': calculated_height},
+            'Very Large (400+ sq ft)': {'width': calculated_width, 'height': calculated_height}
         }
-        return size_map.get(space_size, {'width': 1024, 'height': 768})
+        
+        return size_map.get(space_size, {'width': calculated_width, 'height': calculated_height})
     
     def _create_detailed_image_prompt(self, description: str, preferences: Dict) -> str:
         """Create a detailed prompt optimized for image generation"""
         room_type = preferences['room_type']
         style = preferences['style']
-        colors = ', '.join(preferences.get('colors', ['neutral']))
-        features = ', '.join(preferences.get('features', []))
+        colors = ', '.join(preferences.get('colors', ['white', 'gray']))
         
-        prompt = f"""
-        A beautiful {style.lower()} {room_type.lower()} interior design, {description[:150]}, 
-        featuring {colors} color palette, {features}, professional interior photography, 
-        high quality, well-lit, clean modern furniture, architectural digest style, 
-        realistic lighting, photorealistic, detailed textures, contemporary home decor, 
-        interior design magazine quality, sharp focus, 8k resolution
-        """.strip().replace('\n', ' ').replace('  ', ' ')
+        # Create a prompt similar to your JavaScript examples
+        prompt = f"A beautiful {style.lower()} {room_type.lower()} interior design with {colors} color scheme, professional interior photography, high quality, well-lit, photorealistic"
         
         return prompt
     

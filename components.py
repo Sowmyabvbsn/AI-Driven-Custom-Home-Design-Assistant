@@ -188,14 +188,14 @@ def render_layout_results(layouts: List[Dict]):
                             st.image(
                                 layout['image_url'],
                                 caption="AI-generated interior design visualization",
-                                use_column_width=True
+                                use_container_width=True
                             )
                         else:
                             # Handle regular URLs
                             st.image(
                                 layout['image_url'],
                                 caption="AI-generated interior design visualization",
-                                use_column_width=True
+                                use_container_width=True
                             )
                     except Exception as e:
                         st.error(f"Failed to load image: {str(e)}")
@@ -206,7 +206,7 @@ def render_layout_results(layouts: List[Dict]):
                             st.session_state.ai_service._map_room_type(room_type),
                             st.session_state.ai_service._map_style(style)
                         ) if st.session_state.ai_service else "https://images.pexels.com/photos/1571460/pexels-photo-1571460.jpeg"
-                        st.image(fallback_url, caption="Curated interior design reference", use_column_width=True)
+                        st.image(fallback_url, caption="Curated interior design reference", use_container_width=True)
                 else:
                     st.info("🎨 Generating AI layout visualization...")
             

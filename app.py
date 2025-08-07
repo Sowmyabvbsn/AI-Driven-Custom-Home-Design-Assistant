@@ -140,17 +140,25 @@ def main():
         hf_api_key = st.text_input(
             "Hugging Face API Key (for images)",
             type="password",
-            help="Enter your Hugging Face API key for better image generation"
+            help="Optional: Enter your Hugging Face API key for AI image generation. Get one free at https://huggingface.co/settings/tokens. If not provided, will use Pollinations AI (free) or curated images."
         )
         
         if api_key:
-            # Pass both API keys to the service
-            st.session_state.ai_service = AIService(provider=provider, api_key=api_key)
-            if hf_api_key:
-                st.session_state.ai_service.hf_api_key = hf_api_key
-            st.success(f"✅ {provider.upper()} configured successfully!")
-            if hf_api_key:
-                st.success("✅ Hugging Face API configured for enhanced image generation!")
+            try:
+                # Initialize AI service
+                st.session_state.ai_service = AIService(provider=provider, api_key=api_key)
+                
+                if hf_api_key:
+                    st.session_state.ai_service.hf_api_key = hf_api_key
+                    st.success("✅ AI configured with Hugging Face + Pollinations + curated images!")
+                else:
+                    st.info("ℹ️ Using Pollinations AI (free) + curated images for visualization.")
+                
+                st.success(f"✅ {provider.upper()} configured successfully!")
+            except Exception as e:
+                st.error(f"❌ Failed to configure {provider.upper()}: {str(e)}")
+        else:
+            st.warning("⚠️ Please enter your AI provider API key to get started.")
         
         st.markdown("</div>", unsafe_allow_html=True)
         
